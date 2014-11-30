@@ -95,12 +95,22 @@ class WhooshManager(object):
     """
     The application level stuff for whoosh.
     """
-    def __init__(self, config, index):
-        self.index = index
-        self.search_pool = SearcherPool(config, index)
+    def __init__(self, config, index): 
+        self.minimum = config['WHOOSH_SEARCHER_MIN']
+        self.maximum = config['WHOOSH_SEARCHER_MAX']
+        self.index = index 
+        self.search_pool = self.initialize_searcher_queue()
+
+    def initialize_searcher_queue(self): 
+        queue = Queue.LifoQueue(self.maximum)
+        for i in range(self.minimum):
+            queue.put(SearchAccessor(self.index))
+        for i in range(self.maximum - self.minimum):
+            queue.put(SearchAccessor(self.index, init=True))
+        return queue
 
 
-class SearcherWrapper(object):
+class SearchAccessor(object):
     def __init__(self, index, init=False):
         self.index = index 
         self._searcher = None
@@ -112,25 +122,3 @@ class SearcherWrapper(object):
         if self._searcher is None:
             self._searcher = self.index.searcher()
         return self._searcher
-        
-
-class SearcherPool(object):
-    def __init__(self, config, index):
-        self.minimum = config['WHOOSH_SEARCHER_MIN']
-        self.maximum = config['WHOOSH_SEARCHER_MAX']
-        self.index = index
-        self.queue = self.initialize_queue()
-
-    def get(self):
-        return self.queue.get()
-
-    def put(self, searcher):
-        return self.queue.put(searcher)
-
-    def initialize_queue(self): 
-        queue = Queue.LifoQueue(self.maximum)
-        for i in range(self.minimum):
-            queue.put(SearcherWrapper(self.index))
-        for i in range(self.maximum - self.minimum):
-            queue.put(SearcherWrapper(self.index, init=True))
-        return queue

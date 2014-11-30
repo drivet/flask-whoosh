@@ -63,7 +63,7 @@ class TestFlaskWhooshIndexCreation(unittest.TestCase):
             os.remove('/tmp/toodles') 
 
 
-class TestFlaskWhooshSearch(unittest.TestCase):
+class TestFlaskWhooshSearcher(unittest.TestCase):
     def setUp(self):
         self.root_dir = tempfile.mkdtemp()
         schema = Schema(path = ID(stored=True), content = TEXT)
@@ -91,10 +91,50 @@ class TestFlaskWhooshSearch(unittest.TestCase):
             with self.whoosh.searcher as searcher:
                 ctx = stack.top
                 whoosh_manager = self.app.extensions['whoosh']
-                self.assertEquals(9, whoosh_manager.search_pool.queue.qsize())
+                self.assertEquals(9, whoosh_manager.search_pool.qsize())
                 self.assertIsNotNone(ctx.whoosh_search_accessor)
-        self.assertEquals(10, whoosh_manager.search_pool.queue.qsize())
+        self.assertEquals(10, whoosh_manager.search_pool.qsize())
 
+    def test_same_searcher_returned_in_multiple_calls(self):
+        with self.app.app_context():
+            searcher1 = self.whoosh.searcher
+            searcher2 = self.whoosh.searcher
+            self.assertEquals(searcher1, searcher2)
+
+    def tearDown(self):
+        assert self.root_dir != '/tmp/' and self.root_dir.startswith('/tmp/')
+        shutil.rmtree(self.root_dir)
+
+
+class TestFlaskWhooshWriter(unittest.TestCase):
+    def setUp(self):
+        self.root_dir = tempfile.mkdtemp()
+        schema = Schema(path = ID(stored=True), content = TEXT)
+        self.index = create_in(self.root_dir, schema = schema)
+
+        self.app = Flask(__name__)
+        self.whoosh = Whoosh()
+        self.whoosh.init_app(self.app)
+        self.app.config['WHOOSH_INDEX_ROOT'] =  self.root_dir
+
+    def test_writer_is_usable(self):
+        with self.app.app_context():
+            writer = self.whoosh.writer
+            writer.add_document(path=u'/blah/hello', content=u'this is awesome content')
+            writer.commit()
+            qp = QueryParser("content", schema=self.index.schema)
+            q = qp.parse(u"awesome")
+            with self.index.searcher() as s:
+                results = s.search(q)
+                self.assertEquals(1, len(results))
+                self.assertEquals('/blah/hello', results[0]['path'])
+
+    def test_same_writer_returned_in_multiple_calls(self):
+        with self.app.app_context():
+            writer1 = self.whoosh.writer
+            writer2 = self.whoosh.writer
+            self.assertEquals(writer1, writer2)
+            
     def tearDown(self):
         assert self.root_dir != '/tmp/' and self.root_dir.startswith('/tmp/')
         shutil.rmtree(self.root_dir)
