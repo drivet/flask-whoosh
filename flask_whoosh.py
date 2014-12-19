@@ -1,5 +1,5 @@
 from flask import current_app
-from whoosh.index import create_in, open_dir
+from whoosh.index import create_in, open_dir, exists_in
 from whoosh.fields import Schema
 from whoosh.writing import AsyncWriter
 
@@ -15,7 +15,11 @@ except ImportError:
 
 
 class DirectoryAlreadyExists(Exception):
-    pass
+    def __init__(self, folder): 
+        super(DirectoryAlreadyExists, self).__init__()
+        self.folder = folder
+    def __str__(self):
+        return repr(self.folder)
 
 
 class Whoosh(object):    
@@ -34,15 +38,26 @@ class Whoosh(object):
         else:
             app.teardown_request(self.teardown)
 
-    def init_index(self, fields):
+    def init_index(self, fields, clear=False):
         index_root = current_app.config['WHOOSH_INDEX_ROOT']  
         name = current_app.config['WHOOSH_INDEX_NAME'] or None
-       
-        if os.path.isdir(index_root) and os.listdir(index_root):
-            raise DirectoryAlreadyExists()
-
+      
         if os.path.exists(index_root) and not os.path.isdir(index_root):
-            raise DirectoryAlreadyExists()
+            # index root exists and is not a directory
+            raise DirectoryAlreadyExists(index_root)
+  
+        if os.path.isdir(index_root) and not exists_in(index_root, indexname=name) \
+           and os.listdir(index_root):
+            # index root is a directory and is non-empty and non-index
+            raise DirectoryAlreadyExists(index_root)
+ 
+        if os.path.isdir(index_root) and exists_in(index_root, indexname=name) \
+           and not clear:
+            # index root is an existing index and we don't have permission to clear it
+            raise DirectoryAlreadyExists(index_root)
+
+        # either the directory doesn't exist, or it does but it's empty, or
+        # it does, and has an index, but we have permission to clear it.
 
         if not os.path.exists(index_root):
             os.makedirs(index_root)
