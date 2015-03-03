@@ -18,6 +18,7 @@ class DirectoryAlreadyExists(Exception):
     def __init__(self, folder): 
         super(DirectoryAlreadyExists, self).__init__()
         self.folder = folder
+
     def __str__(self):
         return repr(self.folder)
 
@@ -86,7 +87,6 @@ class Whoosh(object):
                 whoosh_manager = current_app.extensions['whoosh']
                 ctx.whoosh_search_accessor = whoosh_manager.search_pool.get()
             searcher = ctx.whoosh_search_accessor.searcher
-            searcher.refresh()
             return searcher
 
     @property
@@ -136,4 +136,5 @@ class SearchAccessor(object):
     def searcher(self):
         if self._searcher is None:
             self._searcher = self.index.searcher()
+        self._searcher = self._searcher.refresh()
         return self._searcher
