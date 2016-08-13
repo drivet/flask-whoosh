@@ -1,8 +1,9 @@
-"""Flask extension to manipulate Whoosh indexes"""
-from __future__ import absolute_import
+"""Small Flask extension to make manipulating Whoosh indexes a slightly more
+convenient in the context of a Flask web application.
+"""
 
 import os
-import Queue
+import queue as Queue
 
 from flask import current_app
 from whoosh.index import create_in, open_dir, exists_in
@@ -19,8 +20,8 @@ except ImportError:
 
 
 class DirectoryAlreadyExists(Exception):
-    """This is raised when we try to create an index over an existing one
-    without the right option
+    """This exception is raised when we try to create an index over an existing
+    one without the right option.
     """
     def __init__(self, folder):
         super(DirectoryAlreadyExists, self).__init__()
@@ -32,7 +33,11 @@ class DirectoryAlreadyExists(Exception):
 
 class Whoosh(object):
     """This class integrates a Whoosh index into one or more Flask
-    applications
+    applications.
+
+    The basic API consists of a searcher and a writer property.  The searcher
+    comes from a pool of searcher objects and is returned upon completion of
+    the request.  The writer is just an AsyncWriter.
     """
     def __init__(self, app=None):
         self.app = app
@@ -43,19 +48,88 @@ class Whoosh(object):
         """Set this extension up for this application"""
         app.config.setdefault('WHOOSH_INDEX_ROOT', '/tmp')
         app.config.setdefault('WHOOSH_INDEX_NAME', '')
-        app.config.setdefault('WHOOSH_SEARCHER_MIN', 1)
         app.config.setdefault('WHOOSH_SEARCHER_MAX', 10)
         if hasattr(app, 'teardown_appcontext'):
-            app.teardown_appcontext(self.teardown)
+            app.teardown_appcontext(Whoosh.teardown)
         else:
-            app.teardown_request(self.teardown)
+            app.teardown_request(Whoosh.teardown)
 
-    def init_index(self, fields, clear=False):
-        """Initialize an index.  If clear is True we will delete the existing
-        index if there is one"""
+    @staticmethod
+    def init_index(fields, clear=False):
+        return WhooshManager.init_index(current_app.config['WHOOSH_INDEX_ROOT'],
+                                        current_app.config['WHOOSH_INDEX_NAME'],
+                                        fields, clear)
 
+    def _setup_whoosh(self):
+        """Set up the infrastructure required to manipulate whoosh indexes"""
+        if not hasattr(current_app, 'whoosh'):
+            searcher_max = current_app.config['WHOOSH_SEARCHER_MAX']
+            current_app.whoosh = WhooshManager(searcher_max,
+                                               Whoosh._open_index())
+
+    @staticmethod
+    def _open_index():
+        """Open configured whoosh index"""
         index_root = current_app.config['WHOOSH_INDEX_ROOT']
         name = current_app.config['WHOOSH_INDEX_NAME'] or None
+        return open_dir(index_root, indexname=name)
+
+    @property
+    def searcher(self):
+        """Property for a whoosh searcher, used to perform queries"""
+        self._setup_whoosh()
+        ctx = stack.top
+        if ctx is not None:
+            if not hasattr(ctx, 'whoosh_searcher'):
+                ctx.whoosh_searcher = current_app.whoosh.get_searcher()
+            return ctx.whoosh_searcher
+
+    @property
+    def writer(self):
+        """Property for a whoosh AsyncWriter, used to write to the index"""
+        self._setup_whoosh()
+        ctx = stack.top
+        if ctx is not None:
+            if not hasattr(ctx, 'whoosh_writer'):
+                ctx.whoosh_writer = current_app.whoosh.writer()
+            return ctx.whoosh_writer
+
+    @staticmethod
+    def teardown(exception):
+        """Call this when we want to clean up after a request"""
+        ctx = stack.top
+        if hasattr(ctx, 'whoosh_searcher'):
+            current_app.whoosh.put_searcher(ctx.whoosh_searcher)
+
+
+class WhooshManager(object):
+    """Manages Whoosh specific state, like the index object and the searcher pool.
+
+    Whoosh searchers are kept in a pool, which is managed here in a thread safe
+    manner.  In addition, this class provide a way to create a thread safe
+    writer as well.
+    """
+    def __init__(self, search_max, index):
+        self.search_max = search_max
+        self.index = index
+        self.search_pool = self._initialize_searcher_pool()
+
+    @staticmethod
+    def init_index(index_root, name, fields, clear=False):
+        """Initialize and return a Whoosh index.
+
+        If WHOOSH_INDEX_ROOT exists and isn't a folder, or it's a folder but it
+        isn't empty and it isn't an Whoosh index, throw a DirectoryAlreadyExists
+        exception.
+
+        If WHOOSH_INDEX_ROOT doesn't exist, or it exists and is empty, then go
+        ahead and create the index.
+
+        If WHOOSH_INDEX_ROOT already contains a Whoosh index, then throw a
+        DirectoryAlreadyExists exception if clear is False, otherwise clear the
+        index and create a new one.
+        """
+        name = name or None
 
         if os.path.exists(index_root) and not os.path.isdir(index_root):
             # index root exists and is not a directory
@@ -83,85 +157,29 @@ class Whoosh(object):
         schema = Schema(**fields)
         return create_in(index_root, schema=schema, indexname=name)
 
-    def setup_whoosh(self):
-        """Set up the infrastructure required to manipulate whoosh indexes"""
-        if not hasattr(current_app, 'extensions'):
-            current_app.extensions = {}
-        if 'whoosh' not in current_app.extensions:
-            manager = WhooshManager(current_app.config, self.open_index())
-            current_app.extensions['whoosh'] = manager
-
-    def open_index(self):
-        """Open an existing whoosh index"""
-        index_root = current_app.config['WHOOSH_INDEX_ROOT']
-        name = current_app.config['WHOOSH_INDEX_NAME'] or None
-        return open_dir(index_root, indexname = name)
-
-    @property
-    def searcher(self):
-        """Property for a whoosh searcher, used to perform queries"""
-        self.setup_whoosh()
-        ctx = stack.top
-        if ctx is not None:
-            if not hasattr(ctx, 'whoosh_search_accessor'):
-                whoosh_manager = current_app.extensions['whoosh']
-                ctx.whoosh_search_accessor = whoosh_manager.search_pool.get()
-            searcher = ctx.whoosh_search_accessor.searcher
-            return searcher
-
-    @property
-    def writer(self):
-        """Property for a whoosh write, used to write to the index"""
-        self.setup_whoosh()
-        ctx = stack.top
-        if ctx is not None:
-            if not hasattr(ctx, 'whoosh_writer'):
-                whoosh_manager = current_app.extensions['whoosh']
-                ctx.whoosh_writer = AsyncWriter(whoosh_manager.index)
-            return ctx.whoosh_writer
-
-    def teardown(self, exception):
-        """Call this when we want to clean up after a request"""
-        ctx = stack.top
-        if hasattr(ctx, 'whoosh_search_accessor'):
-            whoosh_manager = current_app.extensions['whoosh']
-            whoosh_manager.search_pool.put(ctx.whoosh_search_accessor)
-
-
-class WhooshManager(object):
-    """
-    The application level stuff for whoosh.
-    """
-    def __init__(self, config, index):
-        self.minimum = config['WHOOSH_SEARCHER_MIN']
-        self.maximum = config['WHOOSH_SEARCHER_MAX']
-        self.index = index
-        self.search_pool = self.initialize_searcher_queue()
-
-    def initialize_searcher_queue(self):
+    def _initialize_searcher_pool(self):
         """Basically what the method says.  We create the searcher queue
-        and fill it with
+        and fill it with wrappers around Whoosh searcher objects.  We create
+        the searcher object lazily when someone obtains a wrapper and it has no
+        searcher initialized.
         """
-        queue = Queue.LifoQueue(self.maximum)
-        for i in range(self.minimum):
-            queue.put(SearchAccessor(self.index))
-        for i in range(self.maximum - self.minimum):
-            queue.put(SearchAccessor(self.index, init=True))
+        queue = Queue.LifoQueue(self.search_max)
+        for i in range(self.search_max):
+            queue.put({'searcher': None})
         return queue
 
+    def writer(self):
+        return AsyncWriter(self.index)
 
-class SearchAccessor(object):
-    """Lazy search wrapper.  Will create a whoosh search on demand"""
-    def __init__(self, index, init=False):
-        self.index = index
-        self._searcher = None
-        if init:
-            self._searcher = self.index.searcher()
+    def get_searcher(self):
+        """Fetch a searcher object from the pool"""
+        wrapper = self.search_pool.get()
+        if wrapper['searcher'] is None:
+            wrapper['searcher'] = self.index.searcher()
+        wrapper['searcher'] = wrapper['searcher'].refresh()
+        return wrapper['searcher']
 
-    @property
-    def searcher(self):
-        """Searcher property.  Creates and then caches a whoosh searcher"""
-        if self._searcher is None:
-            self._searcher = self.index.searcher()
-        self._searcher = self._searcher.refresh()
-        return self._searcher
+    def put_searcher(self, searcher):
+        """Return a search object to the pool"""
+        self.search_pool.put({'searcher': searcher})
+

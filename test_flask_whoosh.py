@@ -10,16 +10,11 @@ import shutil
 import tempfile
 from flask import _app_ctx_stack as stack
 
-class TestFlaskWhooshDefaultConfiguration(unittest.TestCase):
-    def test_has_default_min_searcher(self):
-        app = Flask(__name__)
-        whoosh  = Whoosh()
-        whoosh.init_app(app)
-        self.assertEquals(1, app.config['WHOOSH_SEARCHER_MIN'])
 
+class TestFlaskWhooshDefaultConfiguration(unittest.TestCase):
     def test_has_default_max_searcher(self):
         app = Flask(__name__)
-        whoosh  = Whoosh()
+        whoosh = Whoosh()
         whoosh.init_app(app)
         self.assertEquals(10, app.config['WHOOSH_SEARCHER_MAX'])
         
@@ -27,7 +22,7 @@ class TestFlaskWhooshDefaultConfiguration(unittest.TestCase):
 class TestFlaskWhooshIndexCreation(unittest.TestCase):
     def setUp(self):
         self.app = Flask(__name__)
-        self.whoosh  = Whoosh()
+        self.whoosh = Whoosh()
         self.whoosh.init_app(self.app)
         self.app.config['WHOOSH_INDEX_ROOT'] = '/tmp/toodles'
 
@@ -66,16 +61,16 @@ class TestFlaskWhooshIndexCreation(unittest.TestCase):
 class TestFlaskWhooshSearcher(unittest.TestCase):
     def setUp(self):
         self.root_dir = tempfile.mkdtemp()
-        schema = Schema(path = ID(stored=True), content = TEXT)
-        self.index = create_in(self.root_dir, schema = schema)
+        schema = Schema(path=ID(stored=True), content=TEXT)
+        self.index = create_in(self.root_dir, schema=schema)
         writer = self.index.writer()
         writer.add_document(path=u'/blah/hello', content=u'this is awesome content')
         writer.commit()
 
         self.app = Flask(__name__)
-        self.whoosh  = Whoosh()
+        self.whoosh = Whoosh()
         self.whoosh.init_app(self.app)
-        self.app.config['WHOOSH_INDEX_ROOT'] =  self.root_dir
+        self.app.config['WHOOSH_INDEX_ROOT'] = self.root_dir
 
     def test_searcher_is_usable(self): 
         with self.app.app_context():
@@ -90,9 +85,9 @@ class TestFlaskWhooshSearcher(unittest.TestCase):
         with self.app.app_context():
             with self.whoosh.searcher as searcher:
                 ctx = stack.top
-                whoosh_manager = self.app.extensions['whoosh']
+                whoosh_manager = self.app.whoosh
                 self.assertEquals(9, whoosh_manager.search_pool.qsize())
-                self.assertIsNotNone(ctx.whoosh_search_accessor)
+                self.assertIsNotNone(ctx.whoosh_searcher)
         self.assertEquals(10, whoosh_manager.search_pool.qsize())
 
     def test_same_searcher_returned_in_multiple_calls(self):
@@ -109,13 +104,13 @@ class TestFlaskWhooshSearcher(unittest.TestCase):
 class TestFlaskWhooshWriter(unittest.TestCase):
     def setUp(self):
         self.root_dir = tempfile.mkdtemp()
-        schema = Schema(path = ID(stored=True), content = TEXT)
-        self.index = create_in(self.root_dir, schema = schema)
+        schema = Schema(path=ID(stored=True), content=TEXT)
+        self.index = create_in(self.root_dir, schema=schema)
 
         self.app = Flask(__name__)
         self.whoosh = Whoosh()
         self.whoosh.init_app(self.app)
-        self.app.config['WHOOSH_INDEX_ROOT'] =  self.root_dir
+        self.app.config['WHOOSH_INDEX_ROOT'] = self.root_dir
 
     def test_writer_is_usable(self):
         with self.app.app_context():
