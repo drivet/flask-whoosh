@@ -1,8 +1,8 @@
 -r requirements-test.txt
-nosy==1.1.2
+nosy==1.2
 pinocchio==0.4.2
-pylint==1.6.2
-pep8==1.5.7
-rope-py3k==0.9.4.post1
-ropemacs-py3k==0.7
-ropemode-py3k==0.2
+pylint==1.6.4
+pep8==1.7.0
+#rope-py3k==0.9.4.post1
+#ropemacs-py3k==0.7
+#ropemode-py3k==0.2

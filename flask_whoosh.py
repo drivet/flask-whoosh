@@ -56,6 +56,10 @@ class Whoosh(object):
 
     @staticmethod
     def init_index(fields, clear=False):
+        """
+        Initialize and return a Whoosh index.  See WhooshManager.init_index()
+        for details.
+        """
         return WhooshManager.init_index(current_app.config['WHOOSH_INDEX_ROOT'],
                                         current_app.config['WHOOSH_INDEX_NAME'],
                                         fields, clear)
@@ -169,6 +173,7 @@ class WhooshManager(object):
         return queue
 
     def writer(self):
+        """Fetch an AsyncWriter"""
         return AsyncWriter(self.index)
 
     def get_searcher(self):
@@ -182,4 +187,3 @@ class WhooshManager(object):
     def put_searcher(self, searcher):
         """Return a search object to the pool"""
         self.search_pool.put({'searcher': searcher})
-
