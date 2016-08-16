@@ -1,2 +1,3 @@
+Python: true
 exclude_paths:
 - "test_flask_whoosh.py"
